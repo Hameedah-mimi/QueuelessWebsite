@@ -1,224 +1,395 @@
-import { useState, useEffect } from 'react'
-import RoleNavbar from '../../components/layout/RoleNavbar'
-import { useAuth } from '../../context/AuthContext'
+import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
+import RoleNavbar from "../../components/layout/RoleNavbar";
+import { useAuth } from "../../context/AuthContext";
+import api from "../../api/client";
 import {
-  Users, Building2, Calendar, TrendingUp, Activity, AlertCircle
-} from 'lucide-react'
+  Users,
+  Building2,
+  Calendar,
+  TrendingUp,
+  Activity,
+  AlertCircle,
+  ArrowRight,
+  RefreshCw,
+  Clock,
+} from "lucide-react";
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, PieChart, Pie, Cell
-} from 'recharts'
-
-// Demo data – replace with live API calls later
-const BOOKINGS_TREND = [
-  { day: 'Mon', bookings: 42, revenue: 320000 },
-  { day: 'Tue', bookings: 58, revenue: 410000 },
-  { day: 'Wed', bookings: 51, revenue: 380000 },
-  { day: 'Thu', bookings: 67, revenue: 490000 },
-  { day: 'Fri', bookings: 89, revenue: 620000 },
-  { day: 'Sat', bookings: 112, revenue: 780000 },
-  { day: 'Sun', bookings: 74, revenue: 510000 },
-]
-
-const ROLE_SPLIT = [
-  { name: 'Customers', value: 1240, color: '#16A6A1' },
-  { name: 'Workers', value: 186, color: '#102A43' },
-  { name: 'Organizations', value: 94, color: '#F59E0B' },
-]
-
-const RECENT_ACTIVITY = [
-  { id: 1, type: 'booking', text: 'New booking at Glow Beauty Salon', time: '2 min ago', user: 'Adeyemi H.' },
-  { id: 2, type: 'signup', text: 'New organization registered: Luxe Spa', time: '12 min ago', user: 'System' },
-  { id: 3, type: 'worker', text: 'Worker Sarah J. completed a service', time: '18 min ago', user: 'Sarah J.' },
-  { id: 4, type: 'alert', text: 'Organization pending verification', time: '25 min ago', user: 'Admin' },
-  { id: 5, type: 'booking', text: 'Booking cancelled by customer', time: '34 min ago', user: 'Chioma O.' },
-  { id: 6, type: 'signup', text: 'New customer: Tunde Adebayo', time: '1 hr ago', user: 'System' },
-]
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
 
 export default function AdminDashboard() {
-  const { user } = useAuth()
-  const [live, setLive] = useState(true)
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Simulate live updates
+  // Live state computed strictly from backend data
+  const [usersList, setUsersList] = useState([]);
+  const [orgsList, setOrgsList] = useState([]);
+  const [bookingsList, setBookingsList] = useState([]);
+
+  const formatNaira = (amt) =>
+    new Intl.NumberFormat("en-NG", {
+      style: "currency",
+      currency: "NGN",
+      maximumFractionDigits: 0,
+    }).format(amt || 0);
+
+  const fetchDashboardData = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
+    else setRefreshing(true);
+    setError(null);
+
+    try {
+      const [usersRes, orgsRes, bookingsRes] = await Promise.allSettled([
+        api.get("/api/v1/auth/users/"),
+        api.get("/api/v1/organizations/"),
+        api.get("/api/v1/appointments/"),
+      ]);
+
+      const unwrap = (res) => {
+        if (res.status !== "fulfilled") return [];
+        const d = res.value.data;
+        return Array.isArray(d) ? d : d?.results || [];
+      };
+
+      setUsersList(unwrap(usersRes));
+      setOrgsList(unwrap(orgsRes));
+      setBookingsList(unwrap(bookingsRes));
+    } catch (err) {
+      console.error("Admin live fetch error:", err);
+      setError("Unable to synchronize live platform data from Django server.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!live) return
-    const t = setInterval(() => {
-      // In production: poll /api/v1/admin/analytics/ or use WebSocket
-    }, 15000)
-    return () => clearInterval(t)
-  }, [live])
+    fetchDashboardData();
+    const t = setInterval(() => fetchDashboardData(true), 15000);
+    return () => clearInterval(t);
+  }, [fetchDashboardData]);
 
-  const kpis = [
-    { label: 'Total Users', value: '1,520', change: '+48 this week', icon: Users, color: 'text-brand-600 bg-brand-50' },
-    { label: 'Organizations', value: '94', change: '+6 pending', icon: Building2, color: 'text-amber-600 bg-amber-50' },
-    { label: 'Bookings today', value: '186', change: '+12% vs yesterday', icon: Calendar, color: 'text-blue-600 bg-blue-50' },
-    { label: 'Revenue (week)', value: '₦3.5M', change: '+9%', icon: TrendingUp, color: 'text-emerald-600 bg-emerald-50' },
-  ]
+  // --- Real Dynamic Calculations ---
+  const totalUsersCount = usersList.length;
+  const pendingOrgs = orgsList.filter(
+    (o) => o.status === "pending" || o.is_verified === false,
+  );
+  const totalBookingsCount = bookingsList.length;
+  const totalRevenue = bookingsList
+    .filter((b) => (b.status || "").toLowerCase() === "completed")
+    .reduce(
+      (acc, curr) => acc + parseFloat(curr.price || curr.total_amount || 0),
+      0,
+    );
+
+  // Real user mix split
+  const customersCount = usersList.filter((u) => u.role === "customer").length;
+  const workersCount = usersList.filter((u) => u.role === "worker").length;
+  const managersCount = usersList.filter(
+    (u) => u.role === "org_manager" || u.role === "organization",
+  ).length;
+
+  const roleSplitData = [
+    { name: "Customers", value: customersCount, color: "#16A6A1" },
+    { name: "Workers", value: workersCount, color: "#102A43" },
+    { name: "Organizations", value: managersCount, color: "#F59E0B" },
+  ].filter((item) => item.value > 0);
+
+  const displayName =
+    user?.first_name ||
+    user?.full_name?.split(" ")[0] ||
+    user?.email?.split("@")[0] ||
+    "Admin";
 
   return (
-    <div className="min-h-screen bg-ink-50">
+    <div className="min-h-screen bg-ink-50/50">
       <RoleNavbar />
-      <main className="lg:ml-64 p-4 sm:p-6 lg:p-8">
+
+      <main className="lg:ml-64 p-4 sm:p-6 lg:p-10 max-w-7xl mx-auto space-y-8">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-ink-900">Admin Dashboard</h1>
+            <h1 className="text-2xl sm:text-3xl font-black text-ink-900 tracking-tight">
+              Admin Dashboard
+            </h1>
             <p className="text-ink-500 text-sm mt-1">
-              Welcome back, {user?.first_name || 'Admin'} · Live platform overview
+              Welcome back, {displayName} · Live platform statistics from
+              database
             </p>
           </div>
+
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setLive(!live)}
-              className={`flex items-center gap-2 text-sm font-medium px-3 py-1.5 rounded-full ${
-                live ? 'bg-emerald-50 text-emerald-700' : 'bg-ink-100 text-ink-500'
-              }`}
+              onClick={() => fetchDashboardData(true)}
+              disabled={refreshing}
+              className="btn-secondary text-xs px-3.5 py-1.5 font-bold inline-flex items-center gap-1.5 shadow-xs"
             >
-              <span className={`w-2 h-2 rounded-full ${live ? 'bg-emerald-500 animate-pulse' : 'bg-ink-400'}`} />
-              {live ? 'Live' : 'Paused'}
+              <RefreshCw
+                size={14}
+                className={refreshing ? "animate-spin text-brand-600" : ""}
+              />
+              <span>{refreshing ? "Syncing…" : "Sync Live Data"}</span>
             </button>
           </div>
         </div>
 
-        {/* KPI cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {kpis.map((k) => (
-            <div key={k.label} className="card p-5">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-ink-500">{k.label}</p>
-                  <p className="text-2xl font-extrabold text-ink-900 mt-1">{k.value}</p>
-                  <p className="text-xs text-ink-400 mt-1">{k.change}</p>
-                </div>
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${k.color}`}>
-                  <k.icon size={20} />
-                </div>
+        {error && (
+          <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 font-semibold flex items-center justify-between">
+            <span>{error}</span>
+            <button
+              onClick={() => fetchDashboardData()}
+              className="underline hover:text-amber-950 font-bold"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* 4 Clickable KPI Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Link
+            to="/admin/users"
+            className="card p-5 border border-ink-100 bg-white hover:border-brand-300 hover:shadow-md transition-all group"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs font-bold text-ink-400 uppercase tracking-wider">
+                  Total Users
+                </p>
+                <p className="text-3xl font-black text-ink-900 mt-1 group-hover:text-brand-600 transition">
+                  {loading ? "…" : totalUsersCount}
+                </p>
+                <p className="text-xs font-semibold text-brand-600 mt-1">
+                  Live in database
+                </p>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-brand-50 text-brand-600 flex items-center justify-center font-bold">
+                <Users size={22} />
               </div>
             </div>
-          ))}
+          </Link>
+
+          <Link
+            to="/admin/organizations"
+            className="card p-5 border border-ink-100 bg-white hover:border-brand-300 hover:shadow-md transition-all group"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs font-bold text-ink-400 uppercase tracking-wider">
+                  Organizations
+                </p>
+                <p className="text-3xl font-black text-ink-900 mt-1 group-hover:text-brand-600 transition">
+                  {loading ? "…" : orgsList.length}
+                </p>
+                <p className="text-xs font-semibold text-amber-600 mt-1">
+                  {pendingOrgs.length} awaiting approval
+                </p>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+                <Building2 size={22} />
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            to="/admin/bookings"
+            className="card p-5 border border-ink-100 bg-white hover:border-brand-300 hover:shadow-md transition-all group"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs font-bold text-ink-400 uppercase tracking-wider">
+                  Total Bookings
+                </p>
+                <p className="text-3xl font-black text-ink-900 mt-1 group-hover:text-brand-600 transition">
+                  {loading ? "…" : totalBookingsCount}
+                </p>
+                <p className="text-xs font-semibold text-blue-600 mt-1">
+                  All schedules
+                </p>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                <Calendar size={22} />
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            to="/admin/analytics"
+            className="card p-5 border border-ink-100 bg-white hover:border-brand-300 hover:shadow-md transition-all group"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs font-bold text-ink-400 uppercase tracking-wider">
+                  Completed Volume
+                </p>
+                <p className="text-2xl sm:text-3xl font-black text-brand-600 mt-1">
+                  {loading ? "…" : formatNaira(totalRevenue)}
+                </p>
+                <p className="text-xs font-semibold text-emerald-600 mt-1">
+                  Recorded revenue
+                </p>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                <TrendingUp size={22} />
+              </div>
+            </div>
+          </Link>
         </div>
 
-        {/* Charts row */}
-        <div className="grid lg:grid-cols-3 gap-6 mb-8">
-          {/* Bookings trend */}
-          <div className="card p-5 lg:col-span-2">
-            <h2 className="text-base font-bold text-ink-900 mb-4">Bookings this week</h2>
-            <ResponsiveContainer width="100%" height={240}>
-              <AreaChart data={BOOKINGS_TREND}>
-                <defs>
-                  <linearGradient id="gBook" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#16A6A1" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#16A6A1" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                <XAxis dataKey="day" tick={{ fontSize: 12, fill: '#64748B' }} />
-                <YAxis tick={{ fontSize: 12, fill: '#64748B' }} />
-                <Tooltip
-                  contentStyle={{ borderRadius: 12, border: '1px solid #E2E8F0' }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="bookings"
-                  stroke="#16A6A1"
-                  strokeWidth={2}
-                  fill="url(#gBook)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Role split */}
-          <div className="card p-5">
-            <h2 className="text-base font-bold text-ink-900 mb-4">User mix</h2>
-            <ResponsiveContainer width="100%" height={180}>
-              <PieChart>
-                <Pie
-                  data={ROLE_SPLIT}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={75}
-                  paddingAngle={3}
+        {/* User Distribution & Live Activity Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          {/* User Mix Chart (1 Col) */}
+          <div className="card p-6 border border-ink-100 bg-white shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-4 pb-2 border-b border-ink-100">
+                <h2 className="text-sm font-black text-ink-900 uppercase tracking-wider">
+                  Live User Mix
+                </h2>
+                <Link
+                  to="/admin/users"
+                  className="text-xs text-brand-600 font-bold hover:underline"
                 >
-                  {ROLE_SPLIT.map((e) => (
-                    <Cell key={e.name} fill={e.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="space-y-2 mt-2">
-              {ROLE_SPLIT.map((r) => (
-                <div key={r.name} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ background: r.color }} />
-                    {r.name}
+                  Manage
+                </Link>
+              </div>
+
+              {roleSplitData.length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={170}>
+                    <PieChart>
+                      <Pie
+                        data={roleSplitData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={48}
+                        outerRadius={70}
+                        paddingAngle={4}
+                      >
+                        {roleSplitData.map((e) => (
+                          <Cell key={e.name} fill={e.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+
+                  <div className="space-y-2 pt-3 border-t border-ink-100">
+                    {roleSplitData.map((r) => (
+                      <div
+                        key={r.name}
+                        className="flex items-center justify-between text-xs"
+                      >
+                        <div className="flex items-center gap-2 text-ink-600 font-medium">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full"
+                            style={{ background: r.color }}
+                          />
+                          {r.name}
+                        </div>
+                        <span className="font-bold text-ink-900">
+                          {r.value}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                  <span className="font-semibold text-ink-900">{r.value}</span>
+                </>
+              ) : (
+                <div className="py-12 text-center text-xs text-ink-400">
+                  No registered users in the database yet.
                 </div>
-              ))}
+              )}
             </div>
           </div>
-        </div>
 
-        {/* Revenue bar + Live activity */}
-        <div className="grid lg:grid-cols-2 gap-6">
-          <div className="card p-5">
-            <h2 className="text-base font-bold text-ink-900 mb-4">Revenue by day (₦)</h2>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={BOOKINGS_TREND}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                <XAxis dataKey="day" tick={{ fontSize: 12, fill: '#64748B' }} />
-                <YAxis tick={{ fontSize: 12, fill: '#64748B' }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                <Tooltip
-                  formatter={(v) => [`₦${v.toLocaleString()}`, 'Revenue']}
-                  contentStyle={{ borderRadius: 12, border: '1px solid #E2E8F0' }}
-                />
-                <Bar dataKey="revenue" fill="#16A6A1" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Live activity feed */}
-          <div className="card p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-bold text-ink-900 flex items-center gap-2">
-                <Activity size={18} className="text-brand-500" /> Live activity
+          {/* Real Live Activity Feed (2 Cols) */}
+          <div className="card p-6 border border-ink-100 bg-white shadow-sm lg:col-span-2">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-ink-100">
+              <h2 className="text-sm font-black text-ink-900 uppercase tracking-wider flex items-center gap-2">
+                <Activity size={16} className="text-brand-600" /> Recent
+                Platform Activity
               </h2>
-              <span className="text-xs text-ink-400">Auto-refresh</span>
+              <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full">
+                ● Live Database Feed
+              </span>
             </div>
-            <div className="space-y-3 max-h-[260px] overflow-y-auto">
-              {RECENT_ACTIVITY.map((a) => (
-                <div key={a.id} className="flex gap-3 text-sm">
-                  <div className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${
-                    a.type === 'alert' ? 'bg-amber-500' :
-                    a.type === 'booking' ? 'bg-brand-500' :
-                    a.type === 'signup' ? 'bg-blue-500' : 'bg-ink-400'
-                  }`} />
-                  <div className="min-w-0">
-                    <p className="text-ink-800">{a.text}</p>
-                    <p className="text-xs text-ink-400">{a.user} · {a.time}</p>
+
+            <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+              {bookingsList.slice(0, 6).map((b) => (
+                <div
+                  key={b.id}
+                  className="p-3.5 rounded-xl border border-ink-100 bg-ink-50/50 flex items-center justify-between text-xs"
+                >
+                  <div>
+                    <p className="font-bold text-ink-900">
+                      {b.service_name || b.service?.name || "Appointment"} ·{" "}
+                      <span className="text-brand-600">{b.org || "Salon"}</span>
+                    </p>
+                    <p className="text-[11px] text-ink-400 mt-0.5">
+                      Client:{" "}
+                      {b.customer_name || b.customer?.full_name || "Client"} ·{" "}
+                      {b.time || "Scheduled"}
+                    </p>
                   </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white border border-ink-200">
+                    {b.status || "Active"}
+                  </span>
                 </div>
               ))}
+
+              {bookingsList.length === 0 && (
+                <div className="py-16 text-center text-xs text-ink-400">
+                  No appointments or activity logged in the database yet.
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Pending approvals notice */}
-        <div className="mt-6 card p-4 flex items-start gap-3 border-amber-200 bg-amber-50">
-          <AlertCircle size={20} className="text-amber-600 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-amber-900">6 organizations awaiting verification</p>
-            <p className="text-xs text-amber-700 mt-0.5">
-              Review and approve them from the Organizations page so they can start accepting bookings.
-            </p>
-          </div>
-        </div>
+        {/* Pending Approvals Callout */}
+        {pendingOrgs.length > 0 && (
+          <Link
+            to="/admin/organizations"
+            className="card p-5 flex items-center justify-between gap-4 border border-amber-200 bg-gradient-to-r from-amber-50 to-amber-100/30 hover:border-amber-400 hover:shadow-md transition-all group"
+          >
+            <div className="flex items-start gap-3">
+              <AlertCircle
+                size={22}
+                className="text-amber-600 shrink-0 mt-0.5"
+              />
+              <div>
+                <p className="text-sm font-bold text-amber-950">
+                  {pendingOrgs.length} organization
+                  {pendingOrgs.length > 1 ? "s" : ""} awaiting verification
+                </p>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  Review licenses and verify their profiles to allow them to
+                  onboard specialists and accept queue bookings.
+                </p>
+              </div>
+            </div>
+
+            <span className="btn-primary bg-amber-600 hover:bg-amber-700 text-white text-xs px-4 py-2 font-bold shrink-0 inline-flex items-center gap-1 shadow-sm">
+              Review Now <ArrowRight size={13} />
+            </span>
+          </Link>
+        )}
       </main>
     </div>
-  )
+  );
 }

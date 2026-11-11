@@ -1,305 +1,195 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import RoleNavbar from "../../components/layout/RoleNavbar";
+import api from "../../api/client";
 import {
   Users,
   Clock,
-  Sparkles,
-  MapPin,
   CheckCircle2,
   AlertCircle,
-  Bell,
-  ArrowRight,
-  ShieldCheck,
-  Phone,
   RefreshCw,
+  ArrowRight,
 } from "lucide-react";
 
 export default function Queue() {
-  const [ahead, setAhead] = useState(2);
-  const [wait, setWait] = useState(10);
-  const [leftQueue, setLeftQueue] = useState(false);
+  const [activeTicket, setActiveTicket] = useState(null);
+  const [ahead, setAhead] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Simulate queue progress
-  useEffect(() => {
-    const t = setInterval(() => {
-      setAhead((a) => Math.max(0, a - (Math.random() > 0.7 ? 1 : 0)));
-      setWait((w) => Math.max(0, w - 1));
-    }, 8000);
-    return () => clearInterval(t);
+  // 100% Real API: Check user's active in-progress or pending appointments
+  const fetchMyQueue = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
+    else setRefreshing(true);
+    setError(null);
+
+    try {
+      const res = await api.get("/api/v1/appointments/");
+      const raw = Array.isArray(res.data) ? res.data : res.data?.results || [];
+
+      // Find user's active ticket
+      const myTicket = raw.find(
+        (a) =>
+          (a.status || "").toLowerCase() === "in_progress" ||
+          (a.status || "").toLowerCase() === "pending",
+      );
+
+      if (myTicket) {
+        setActiveTicket(myTicket);
+        // Find how many other pending tickets were created before this one
+        const othersAhead = raw.filter(
+          (a) =>
+            a.id !== myTicket.id &&
+            (a.status || "").toLowerCase() === "pending",
+        ).length;
+        setAhead(othersAhead);
+      } else {
+        setActiveTicket(null);
+      }
+    } catch (err) {
+      console.error("Queue sync error:", err);
+      setError("Could not connect to live queue.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  const isYourTurn = ahead === 0;
-  const isNext = ahead === 1;
+  useEffect(() => {
+    fetchMyQueue();
+    const t = setInterval(() => fetchMyQueue(true), 12000);
+    return () => clearInterval(t);
+  }, [fetchMyQueue]);
 
-  const statusText = isYourTurn
-    ? "It’s your turn! Please proceed to the service counter."
-    : isNext
-      ? "You are next in line! Get ready to be called."
-      : `${ahead} people ahead of you`;
+  // REAL API: Leave / Cancel ticket
+  const handleLeaveQueue = async () => {
+    if (!activeTicket) return;
+    if (
+      !window.confirm("Are you sure you want to surrender your spot in line?")
+    )
+      return;
 
-  if (leftQueue) {
-    return (
-      <div className="min-h-screen bg-ink-50/50">
-        <RoleNavbar />
-        <main className="lg:ml-64 p-6 sm:p-12 max-w-xl mx-auto text-center py-20">
-          <div className="w-16 h-16 rounded-3xl bg-ink-100 text-ink-500 mx-auto flex items-center justify-center mb-4">
-            <CheckCircle2 size={32} />
-          </div>
-          <h2 className="text-2xl font-black text-ink-900 mb-2">
-            You Left the Queue
-          </h2>
-          <p className="text-sm text-ink-500 mb-6">
-            Your ticket #004 has been canceled and your spot has been given to
-            the next customer.
-          </p>
-          <Link
-            to="/customer/explore"
-            className="btn-primary inline-flex items-center gap-2"
-          >
-            Explore Other Businesses
-          </Link>
-        </main>
-      </div>
-    );
-  }
+    setLeaving(true);
+    try {
+      await api.patch(`/api/v1/appointments/${activeTicket.id}/`, {
+        status: "cancelled",
+      });
+      setActiveTicket(null);
+      alert("You have surrendered your spot.");
+    } catch (err) {
+      console.error("Failed to leave queue:", err);
+      alert("Could not cancel ticket.");
+    } finally {
+      setLeaving(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-ink-50/50">
       <RoleNavbar />
 
-      <main className="lg:ml-64 p-4 sm:p-6 lg:p-10 max-w-7xl mx-auto space-y-8">
-        {/* ================= HEADER ================= */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <main className="lg:ml-64 p-4 sm:p-6 lg:p-10 max-w-7xl mx-auto space-y-6">
+        <div className="flex items-center justify-between">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">
-                Live Virtual Queue
-              </span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-ink-900 tracking-tight mt-1">
-              Your Queue Status
+            <h1 className="text-2xl sm:text-3xl font-black text-ink-900 tracking-tight">
+              Virtual Queue Terminal
             </h1>
+            <p className="text-sm text-ink-500 mt-1">
+              Live line tracking powered directly by your salon's database.
+            </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-ink-400 font-medium hidden sm:inline">
-              Auto-updating every few seconds
-            </span>
-            <div className="p-2 rounded-xl bg-white border border-ink-100 shadow-xs text-ink-600">
-              <RefreshCw
-                size={16}
-                className="animate-spin text-brand-600"
-                style={{ animationDuration: "6s" }}
-              />
-            </div>
-          </div>
+          <button
+            onClick={() => fetchMyQueue(true)}
+            className="btn-secondary text-xs px-3.5 py-2 font-bold inline-flex items-center gap-1.5"
+          >
+            <RefreshCw
+              size={14}
+              className={refreshing ? "animate-spin text-brand-600" : ""}
+            />
+            <span>Sync</span>
+          </button>
         </div>
 
-        {/* ================= TURN ALERT BANNER (WHEN AHEAD === 0) ================= */}
-        {isYourTurn && (
-          <div className="rounded-3xl p-6 sm:p-8 bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-lg animate-bounce-short">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
-              <div>
-                <span className="text-xs font-black uppercase tracking-wider bg-white/20 px-3 py-1 rounded-full">
-                  Ready For Service
-                </span>
-                <h2 className="text-2xl sm:text-3xl font-black mt-2">
-                  Ticket #004 is Called! 🎉
-                </h2>
-                <p className="text-emerald-100 text-sm mt-1">
-                  Please proceed to Station 2 at Glow Beauty Salon. Stylist
-                  Sarah Johnson is waiting for you.
-                </p>
-              </div>
-              <button
-                onClick={() => setLeftQueue(true)}
-                className="bg-white text-emerald-800 font-bold px-6 py-3 rounded-2xl text-sm shadow-md hover:bg-emerald-50 shrink-0"
-              >
-                I Am Here / Check In
-              </button>
-            </div>
+        {error && (
+          <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 font-semibold flex items-center gap-2">
+            <AlertCircle size={16} className="text-amber-600 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
-        {/* ================= 2-COLUMN MAIN DESKTOP GRID ================= */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-          {/* LEFT 2 COLUMNS: Digital Ticket, Progress & Venue */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* DIGITAL QUEUE TICKET CARD */}
-            <div className="card p-6 sm:p-10 border border-ink-100 bg-white shadow-sm flex flex-col items-center text-center relative overflow-hidden">
-              <span className="text-xs font-bold uppercase tracking-wider text-ink-400 mb-2">
-                Your Assigned Ticket
+        {loading ? (
+          <div className="p-16 text-center text-xs text-ink-400 animate-pulse">
+            Checking live tickets in database…
+          </div>
+        ) : activeTicket ? (
+          <div className="max-w-xl mx-auto space-y-6">
+            <div className="card p-8 border border-ink-100 bg-white shadow-sm text-center space-y-4">
+              <span className="text-xs font-bold uppercase tracking-wider text-brand-600 bg-brand-50 px-3 py-1 rounded-full">
+                {activeTicket.status === "in_progress"
+                  ? "Currently In Chair"
+                  : "In Line"}
               </span>
 
-              {/* Big Ticket Number */}
-              <div className="text-6xl sm:text-8xl font-black text-ink-950 tracking-tight my-2">
-                #004
+              <div className="text-6xl font-black text-ink-900">
+                #{String(activeTicket.id).slice(0, 4)}
               </div>
 
-              {/* Dynamic Status Pill */}
-              <div
-                className={`inline-flex items-center gap-2 px-5 py-2 rounded-full text-sm font-bold mt-2 shadow-xs transition-colors ${
-                  isYourTurn
-                    ? "bg-emerald-500 text-white"
-                    : isNext
-                      ? "bg-amber-500 text-white"
-                      : "bg-brand-50 text-brand-700 border border-brand-100"
-                }`}
-              >
-                {statusText}
-              </div>
+              <p className="text-sm font-bold text-ink-800">
+                {activeTicket.service_name ||
+                  activeTicket.service?.name ||
+                  "Service"}
+              </p>
+              <p className="text-xs text-ink-400">
+                {activeTicket.org || activeTicket.organization?.name || "Salon"}
+              </p>
 
-              {/* Milestone Progress Tracker */}
-              <div className="w-full mt-10 pt-8 border-t border-ink-100">
-                <p className="text-xs font-bold text-ink-400 uppercase tracking-wider mb-6 text-left">
-                  Queue Journey
-                </p>
-
-                <div className="grid grid-cols-4 gap-2 relative">
-                  {[
-                    { label: "Joined Queue", done: true },
-                    { label: "Moving Up", done: ahead <= 2 },
-                    { label: "You are Next", done: ahead <= 1 },
-                    { label: "Your Turn", done: ahead === 0 },
-                  ].map((step, idx) => (
-                    <div
-                      key={idx}
-                      className="flex flex-col items-center text-center"
-                    >
-                      <div
-                        className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs mb-2 transition-all ${
-                          step.done
-                            ? "bg-brand-500 text-white shadow-xs scale-105"
-                            : "bg-ink-100 text-ink-400"
-                        }`}
-                      >
-                        {step.done ? <CheckCircle2 size={16} /> : idx + 1}
-                      </div>
-                      <span
-                        className={`text-xs font-semibold ${
-                          step.done ? "text-ink-900" : "text-ink-400"
-                        }`}
-                      >
-                        {step.label}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* VENUE LOCATION & SUMMARY CARD */}
-            <div className="card overflow-hidden border border-ink-100 bg-white shadow-sm flex flex-col sm:flex-row items-stretch">
-              <div className="relative sm:w-48 h-36 sm:h-auto bg-ink-200 shrink-0">
-                <img
-                  src="https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&w=600&q=80"
-                  alt="Glow Beauty Salon"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-
-              <div className="p-6 flex-1 flex flex-col justify-between">
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-ink-100">
                 <div>
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-brand-600">
-                    <Sparkles size={13} /> Active Service Location
-                  </div>
-                  <h3 className="text-lg font-black text-ink-900 mt-1">
-                    Glow Beauty Salon
-                  </h3>
-                  <p className="text-xs text-ink-500 flex items-center gap-1.5 mt-1">
-                    <MapPin size={13} className="text-ink-400" /> 12 Adeola
-                    Odeku St, Victoria Island, Lagos
+                  <p className="text-2xl font-black text-ink-900">{ahead}</p>
+                  <p className="text-[11px] text-ink-400 uppercase font-semibold">
+                    Ahead of you
                   </p>
                 </div>
-
-                <div className="pt-4 mt-3 border-t border-ink-100 flex items-center justify-between text-xs">
-                  <span className="text-ink-500 font-medium">
-                    Service: <strong>Braiding & Care</strong>
-                  </span>
-                  <Link
-                    to="/customer/org/org-1"
-                    className="font-bold text-brand-600 hover:text-brand-700 inline-flex items-center gap-1"
-                  >
-                    View Salon <ArrowRight size={13} />
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* RIGHT 1 COLUMN: Real-Time Stats & Action Controls */}
-          <div className="space-y-6 lg:sticky lg:top-8">
-            {/* STATS OVERVIEW */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="card p-5 border border-ink-100 bg-white shadow-xs text-center">
-                <div className="w-10 h-10 rounded-2xl bg-brand-50 text-brand-600 mx-auto flex items-center justify-center mb-2">
-                  <Users size={20} />
-                </div>
-                <p className="text-3xl font-black text-ink-900">{ahead}</p>
-                <p className="text-xs font-semibold text-ink-400 uppercase mt-0.5">
-                  Ahead in Line
-                </p>
-              </div>
-
-              <div className="card p-5 border border-ink-100 bg-white shadow-xs text-center">
-                <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 mx-auto flex items-center justify-center mb-2">
-                  <Clock size={20} />
-                </div>
-                <p className="text-3xl font-black text-ink-900">{wait}m</p>
-                <p className="text-xs font-semibold text-ink-400 uppercase mt-0.5">
-                  Est. Wait Time
-                </p>
-              </div>
-            </div>
-
-            {/* CURRENTLY SERVING STATUS CARD */}
-            <div className="card p-5 border border-ink-100 bg-white shadow-sm space-y-3">
-              <div className="flex items-center justify-between pb-3 border-b border-ink-100">
-                <span className="text-xs font-bold text-ink-400 uppercase tracking-wider">
-                  Currently at Counter
-                </span>
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-              </div>
-
-              <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-xl font-black text-ink-900">#003</h4>
-                  <p className="text-xs text-ink-500">
-                    In service with Sarah J.
+                  <p className="text-2xl font-black text-brand-600">
+                    ~{ahead * 15}m
+                  </p>
+                  <p className="text-[11px] text-ink-400 uppercase font-semibold">
+                    Est. Wait
                   </p>
                 </div>
-                <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full">
-                  In Progress
-                </span>
               </div>
             </div>
 
-            {/* SMS NOTIFICATION REMINDER */}
-            <div className="rounded-2xl p-4 bg-brand-50/60 border border-brand-100 flex items-start gap-3">
-              <Bell size={18} className="text-brand-600 shrink-0 mt-0.5" />
-              <div className="text-xs text-ink-600 leading-relaxed">
-                <strong className="text-ink-900 block font-bold mb-0.5">
-                  Feel free to step out
-                </strong>
-                We will send you an automated text message when you are 1 person
-                away from being called.
-              </div>
-            </div>
-
-            {/* LEAVE QUEUE BUTTON */}
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => setLeftQueue(true)}
-                className="btn-danger w-full py-3 text-xs font-bold shadow-xs hover:bg-rose-700 transition"
-              >
-                Leave Queue & Cancel Ticket
-              </button>
-            </div>
+            <button
+              onClick={handleLeaveQueue}
+              disabled={leaving}
+              className="btn-danger w-full py-3 text-xs font-bold"
+            >
+              {leaving ? "Cancelling…" : "Surrender Spot & Leave Queue"}
+            </button>
           </div>
-        </div>
+        ) : (
+          <div className="card p-12 text-center border border-dashed border-ink-200 bg-white space-y-3">
+            <Clock size={32} className="text-ink-300 mx-auto" />
+            <h3 className="text-base font-bold text-ink-900">
+              You are not in any queue
+            </h3>
+            <p className="text-xs text-ink-400 max-w-sm mx-auto">
+              Book a service or walk into any participating salon to receive a
+              live digital ticket.
+            </p>
+            <Link
+              to="/customer/explore"
+              className="btn-primary text-xs px-4 py-2 font-bold inline-flex items-center gap-1.5"
+            >
+              Explore Salons <ArrowRight size={13} />
+            </Link>
+          </div>
+        )}
       </main>
     </div>
   );

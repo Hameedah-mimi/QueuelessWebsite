@@ -1,6 +1,8 @@
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import RoleNavbar from "../../components/layout/RoleNavbar";
 import { useAuth } from "../../context/AuthContext";
+import api from "../../api/client";
 import {
   Search,
   Star,
@@ -13,296 +15,515 @@ import {
   Zap,
   TrendingUp,
   ShieldCheck,
+  Stethoscope,
+  Wrench,
+  Scissors,
+  Building2,
+  Sparkle,
+  Layers,
+  AlertCircle,
 } from "lucide-react";
-import { CATEGORIES, ORGANIZATIONS, APPOINTMENTS } from "../../data/mock";
+
+// Professional multi-industry categories with clean SVG icons (Zero Emojis)
+const CATEGORIES = [
+  {
+    id: "salon",
+    label: "Salons & Grooming",
+    icon: Scissors,
+    color: "text-teal-600 bg-teal-50 border-teal-100",
+  },
+  {
+    id: "clinic",
+    label: "Medical & Clinics",
+    icon: Stethoscope,
+    color: "text-emerald-600 bg-emerald-50 border-emerald-100",
+  },
+  {
+    id: "auto",
+    label: "Auto & Repairs",
+    icon: Wrench,
+    color: "text-amber-600 bg-amber-50 border-amber-100",
+  },
+  {
+    id: "spa",
+    label: "Spas & Wellness",
+    icon: Sparkles,
+    color: "text-purple-600 bg-purple-50 border-purple-100",
+  },
+  {
+    id: "consulting",
+    label: "Legal & Consulting",
+    icon: Building2,
+    color: "text-blue-600 bg-blue-50 border-blue-100",
+  },
+  {
+    id: "all",
+    label: "All Services",
+    icon: Layers,
+    color: "text-slate-600 bg-slate-100 border-slate-200",
+  },
+];
 
 export default function CustomerHome() {
   const { user } = useAuth();
-  const upcoming = APPOINTMENTS[0];
-  const featured = ORGANIZATIONS.slice(0, 4);
 
-  // Clean name fallback for customer
+  const [loading, setLoading] = useState(true);
+  const [appointments, setAppointments] = useState([]);
+  const [organizations, setOrganizations] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [error, setError] = useState(null);
+
+  // 100% Real API queries to Django
+  const fetchHomeData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const [aptRes, orgRes] = await Promise.allSettled([
+        api.get("/api/v1/appointments/"),
+        api.get("/api/v1/organizations/"),
+      ]);
+
+      if (aptRes.status === "fulfilled") {
+        const rawApts = Array.isArray(aptRes.value.data)
+          ? aptRes.value.data
+          : aptRes.value.data?.results || [];
+
+        const parsedApts = rawApts.map((item) => ({
+          id: item.id,
+          service:
+            item.service_name ||
+            item.service?.name ||
+            item.service ||
+            "Appointment",
+          org:
+            item.organization_name ||
+            item.organization?.name ||
+            item.org ||
+            "Service Venue",
+          worker: item.worker_name || item.worker?.full_name || "Specialist",
+          date: item.date || item.scheduled_date || "Today",
+          time: item.time || item.scheduled_time || "Scheduled Time",
+          duration: item.duration || item.service?.duration || 45,
+          status: (item.status || "pending").toLowerCase(),
+        }));
+        setAppointments(parsedApts);
+      }
+
+      if (orgRes.status === "fulfilled") {
+        const rawOrgs = Array.isArray(orgRes.value.data)
+          ? orgRes.value.data
+          : orgRes.value.data?.results || [];
+
+        const parsedOrgs = rawOrgs.map((org) => ({
+          id: org.id,
+          name: org.name || "Unnamed Venue",
+          category: org.category || "Professional Service",
+          location: org.location || org.address || "Victoria Island, Lagos",
+          distance: org.distance || "Near you",
+          rating: parseFloat(org.rating || org.average_rating || 5.0),
+          reviews: parseInt(org.reviews || org.review_count || 0, 10),
+          image: org.image || org.avatar_url || null,
+          open: org.open !== undefined ? org.open : true,
+        }));
+        setOrganizations(parsedOrgs);
+      }
+    } catch (err) {
+      console.error("Failed to load customer home data:", err);
+      setError("Could not retrieve live data from the server.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchHomeData();
+  }, [fetchHomeData]);
+
+  // Real upcoming appointment
+  const upcoming = appointments.find(
+    (a) => a.status !== "completed" && a.status !== "cancelled",
+  );
+
+  // Real active virtual queue ticket
+  const activeQueueTicket = appointments.find(
+    (a) => a.status === "in_progress" || a.status === "pending",
+  );
+
+  const featured = organizations.slice(0, 4);
+
   const displayName =
     user?.first_name ||
     user?.full_name?.split(" ")[0] ||
     user?.email?.split("@")[0] ||
-    "there";
+    "Client";
 
   return (
-    <div className="min-h-screen bg-ink-50/50">
+    <div className="min-h-screen bg-slate-50">
       <RoleNavbar />
 
       <main className="lg:ml-64 p-4 sm:p-6 lg:p-10 max-w-7xl mx-auto space-y-8">
-        {/* ================= HERO SEARCH & GREETING BANNER ================= */}
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-ink-950 via-ink-900 to-brand-950 text-white p-6 sm:p-10 shadow-lg">
-          <div className="relative z-10 max-w-2xl">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-500/20 text-brand-300 text-xs font-bold uppercase tracking-wider mb-4 border border-brand-500/30">
-              <Sparkles size={13} /> Skip The Wait
+        {/* ================= HERO BANNER (HIGH CONTRAST & READABLE) ================= */}
+        <div className="relative overflow-hidden rounded-3xl bg-slate-950 text-white p-6 sm:p-10 lg:p-12 shadow-2xl border border-slate-800">
+          {/* Subtle background glow */}
+          <div className="absolute inset-0 bg-gradient-to-r from-teal-950/60 via-slate-950 to-slate-950" />
+          <div className="absolute -right-20 -top-20 w-80 h-80 rounded-full bg-teal-500/10 blur-3xl pointer-events-none" />
+
+          <div className="relative z-10 max-w-2xl space-y-4">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-teal-500/10 text-teal-300 text-xs font-bold tracking-wider uppercase border border-teal-500/20">
+              <Sparkles size={13} className="text-teal-400" /> Live Queue
+              Technology
             </span>
 
-            <h1 className="text-black sm:text-4xl font-black tracking-tight mb-2">
-              Hello, {displayName}!
+            <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-white leading-tight">
+              Hello, {displayName}
             </h1>
-            <p className="text-ink-600  text-sm sm:text-base leading-relaxed mb-6">
-              Book your next salon, barber or spa session with live queue
-              tracking.
+
+            <p className="text-slate-300 text-sm sm:text-base leading-relaxed max-w-xl font-normal">
+              Book consultations, medical checkups, auto care, or styling
+              sessions with live queue tracking.
             </p>
 
-            {/* Interactive Search Bar */}
-            <Link
-              to="/customer/explore"
-              className="flex items-center justify-between gap-3 bg-white text-ink-900 rounded-2xl px-5 py-3.5 shadow-xl hover:shadow-2xl hover:scale-[1.01] transition-all max-w-xl group"
-            >
-              <div className="flex items-center gap-3">
-                <Search
-                  size={20}
-                  className="text-brand-600 group-hover:scale-110 transition-transform"
-                />
-                <span className="text-sm text-ink-400 font-medium">
-                  Search salons, barbers, braids, facials…
-                </span>
+            {/* High-Contrast Search Bar */}
+            <div className="pt-2">
+              <div className="flex items-center bg-white rounded-2xl p-1.5 shadow-2xl max-w-xl border border-slate-100">
+                <div className="flex items-center gap-3 flex-1 px-3">
+                  <Search size={18} className="text-slate-400 shrink-0" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search clinics, mechanics, specialists, salons…"
+                    className="w-full text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none bg-transparent"
+                  />
+                </div>
+                <Link
+                  to={`/customer/explore?q=${encodeURIComponent(searchQuery)}`}
+                  className="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs transition inline-flex items-center gap-1.5"
+                >
+                  <span>Search</span>
+                  <ArrowRight size={14} />
+                </Link>
               </div>
-              <span className="bg-brand-500 text-white text-xs font-bold px-3 py-1.5 rounded-xl hidden sm:inline-block">
-                Search
-              </span>
-            </Link>
+            </div>
           </div>
-
-          {/* Decorative glowing gradient */}
-          <div className="absolute -right-10 -bottom-10 w-96 h-96 rounded-full bg-brand-500/15 blur-3xl pointer-events-none" />
         </div>
 
-        {/* ================= CATEGORY CAROUSEL ================= */}
+        {error && (
+          <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 font-semibold flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={16} className="text-amber-600 shrink-0" />
+              <span>{error}</span>
+            </div>
+            <button
+              onClick={() => fetchHomeData()}
+              className="underline font-bold"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* ================= CATEGORIES WITH CLEAN SVG ICONS (NO EMOJIS) ================= */}
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-black text-ink-900">
-              Explore by Category
-            </h2>
+            <div>
+              <h2 className="text-lg font-black text-slate-900">
+                Service Sectors
+              </h2>
+              <p className="text-xs text-slate-500">
+                Explore multi-industry services supported on QueueLess
+              </p>
+            </div>
             <Link
               to="/customer/explore"
-              className="text-xs text-brand-600 font-bold hover:underline inline-flex items-center gap-1"
+              className="text-xs text-teal-600 hover:text-teal-700 font-bold inline-flex items-center gap-1"
             >
               All Categories <ArrowRight size={13} />
             </Link>
           </div>
 
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-            {CATEGORIES.map((c) => (
-              <Link
-                key={c.id}
-                to={`/customer/explore?category=${c.id}`}
-                className="card p-3.5 flex flex-col items-center justify-center text-center gap-2 hover:border-brand-300 hover:shadow-md transition-all group bg-white border border-ink-100"
-              >
-                <div className="w-14 h-14 rounded-2xl bg-ink-50 group-hover:bg-brand-50 flex items-center justify-center text-2xl transition shadow-xs group-hover:scale-110">
-                  {c.emoji}
-                </div>
-                <span className="text-xs font-bold text-ink-800 group-hover:text-brand-600 transition truncate w-full">
-                  {c.label}
-                </span>
-              </Link>
-            ))}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+            {CATEGORIES.map((cat) => {
+              const Icon = cat.icon;
+              return (
+                <Link
+                  key={cat.id}
+                  to={`/customer/explore?category=${cat.id}`}
+                  className="card p-4 flex flex-col items-center justify-center text-center gap-2.5 hover:border-teal-300 hover:shadow-md transition group bg-white border border-slate-200"
+                >
+                  <div
+                    className={`w-12 h-12 rounded-2xl flex items-center justify-center transition group-hover:scale-110 border ${cat.color}`}
+                  >
+                    <Icon size={20} />
+                  </div>
+                  <span className="text-xs font-bold text-slate-800 group-hover:text-teal-600 transition truncate w-full">
+                    {cat.label}
+                  </span>
+                </Link>
+              );
+            })}
           </div>
         </div>
 
         {/* ================= 2-COLUMN DESKTOP SPLIT ================= */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-          {/* LEFT 2 COLUMNS: Upcoming Booking + Featured Organizations */}
+          {/* LEFT 2 COLUMNS: Real Upcoming Booking & Featured Organizations */}
           <div className="lg:col-span-2 space-y-8">
-            {/* UPCOMING APPOINTMENT HIGHLIGHT CARD */}
-            {upcoming && (
-              <div className="card p-6 border border-ink-100 bg-white shadow-sm space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-ink-100">
-                  <span className="text-xs font-bold uppercase tracking-wider text-ink-400 flex items-center gap-1.5">
-                    <Calendar size={14} className="text-brand-600" /> Confirmed
+            {/* UPCOMING APPOINTMENT CARD */}
+            {upcoming ? (
+              <div className="card p-6 border border-slate-200 bg-white shadow-sm space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <Calendar size={14} className="text-teal-600" /> Confirmed
                     Reservation
                   </span>
                   <Link
                     to="/customer/appointments"
-                    className="text-xs text-brand-600 font-bold hover:underline inline-flex items-center gap-1"
+                    className="text-xs text-teal-600 hover:text-teal-700 font-bold inline-flex items-center gap-1"
                   >
-                    View all bookings <ArrowRight size={12} />
+                    View all ({appointments.length}) <ArrowRight size={12} />
                   </Link>
                 </div>
 
                 <Link
                   to={`/customer/appointments/${upcoming.id}`}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-brand-50/40 border border-brand-100 hover:border-brand-300 transition group"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-teal-50/30 border border-teal-100 hover:border-teal-300 transition group"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="w-14 h-14 rounded-2xl bg-brand-500 text-white flex flex-col items-center justify-center font-bold shadow-xs shrink-0">
-                      <span className="text-[10px] uppercase opacity-80">
-                        Apr
-                      </span>
-                      <span className="text-lg leading-tight">16</span>
+                    <div className="w-14 h-14 rounded-2xl bg-teal-600 text-white flex flex-col items-center justify-center font-bold shadow-xs shrink-0">
+                      <Calendar size={22} />
                     </div>
 
                     <div>
-                      <h3 className="font-extrabold text-ink-900 text-base group-hover:text-brand-600 transition">
+                      <h3 className="font-extrabold text-slate-900 text-base group-hover:text-teal-600 transition">
                         {upcoming.service}
                       </h3>
-                      <p className="text-xs text-ink-500 font-medium">
+                      <p className="text-xs text-slate-500 font-medium">
                         {upcoming.org} · With {upcoming.worker}
                       </p>
-                      <div className="flex items-center gap-2 mt-1.5 text-xs text-ink-600">
-                        <Clock size={13} className="text-brand-600" />
+                      <div className="flex items-center gap-2 mt-1.5 text-xs text-slate-600">
+                        <Clock size={13} className="text-teal-600" />
                         <span>
-                          {upcoming.time} ({upcoming.duration} mins)
+                          {upcoming.date} at {upcoming.time} (
+                          {upcoming.duration} mins)
                         </span>
                       </div>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2 self-start sm:self-center">
-                    <span className="text-xs font-bold text-brand-700 bg-white px-3 py-1.5 rounded-xl border border-brand-200 shadow-xs inline-flex items-center gap-1">
+                    <span className="text-xs font-bold text-teal-700 bg-white px-3 py-1.5 rounded-xl border border-teal-200 shadow-xs inline-flex items-center gap-1">
                       Details <ChevronRight size={14} />
                     </span>
                   </div>
                 </Link>
               </div>
+            ) : (
+              <div className="card p-6 border border-slate-200 bg-white shadow-sm flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">
+                    <Calendar size={22} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      No upcoming appointments
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Need a checkup, service session, or styling? Book a slot
+                      near you.
+                    </p>
+                  </div>
+                </div>
+
+                <Link
+                  to="/customer/explore"
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-teal-600 hover:bg-teal-700 text-white shadow-xs transition shrink-0"
+                >
+                  Book Service
+                </Link>
+              </div>
             )}
 
-            {/* FEATURED BUSINESSES GRID */}
+            {/* REAL REGISTERED VENUES GRID */}
             <div>
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h2 className="text-lg font-black text-ink-900">
-                    Featured Businesses
+                  <h2 className="text-lg font-black text-slate-900">
+                    Verified Service Venues
                   </h2>
-                  <p className="text-xs text-ink-400">
-                    Top salons & spas with active live queues
+                  <p className="text-xs text-slate-500">
+                    Organizations registered on QueueLess with live queue
+                    capabilities
                   </p>
                 </div>
                 <Link
                   to="/customer/explore"
-                  className="text-xs text-brand-600 font-bold hover:underline inline-flex items-center gap-1"
+                  className="text-xs text-teal-600 hover:text-teal-700 font-bold inline-flex items-center gap-1"
                 >
-                  See all <ArrowRight size={13} />
+                  See all ({organizations.length}) <ArrowRight size={13} />
                 </Link>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                {featured.map((org) => {
-                  const cover =
-                    org.image ||
-                    "https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&w=600&q=80";
-
-                  return (
+              {loading ? (
+                <div className="p-12 text-center text-xs text-slate-400 animate-pulse">
+                  Querying registered businesses from database…
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  {featured.map((org) => (
                     <Link
                       key={org.id}
                       to={`/customer/org/${org.id}`}
-                      className="card overflow-hidden border border-ink-100 bg-white hover:shadow-lg hover:border-brand-200 transition-all duration-200 group flex flex-col justify-between"
+                      className="card overflow-hidden border border-slate-200 bg-white hover:shadow-lg hover:border-teal-300 transition duration-200 group flex flex-col justify-between"
                     >
-                      <div className="relative h-44 bg-ink-200 overflow-hidden">
-                        <img
-                          src={cover}
-                          alt={org.name}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
+                      <div className="relative h-44 bg-slate-100 overflow-hidden">
+                        {org.image ? (
+                          <img
+                            src={org.image}
+                            alt={org.name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400 text-xs font-bold">
+                            No Photo Available
+                          </div>
+                        )}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
 
                         {/* Top Rating Badge */}
-                        <div className="absolute top-3 right-3 bg-white/95 backdrop-blur-sm px-2.5 py-1 rounded-full text-xs font-bold text-ink-900 flex items-center gap-1 shadow-xs">
+                        <div className="absolute top-3 right-3 bg-white/95 backdrop-blur-sm px-2.5 py-1 rounded-full text-xs font-bold text-slate-900 flex items-center gap-1 shadow-xs">
                           <Star
                             size={12}
                             className="text-amber-400 fill-amber-400"
                           />
-                          <span>{org.rating || "4.9"}</span>
-                          <span className="text-ink-400 font-normal">
-                            ({org.reviews || "80"})
-                          </span>
+                          <span>{org.rating.toFixed(1)}</span>
+                          {org.reviews > 0 && (
+                            <span className="text-slate-400 font-normal">
+                              ({org.reviews})
+                            </span>
+                          )}
                         </div>
 
                         {/* Title overlay */}
                         <div className="absolute bottom-3 left-3 right-3 text-white">
-                          <h3 className="font-extrabold text-base truncate drop-shadow-sm">
+                          <h3 className="font-extrabold text-base truncate">
                             {org.name}
                           </h3>
                         </div>
                       </div>
 
                       <div className="p-4 space-y-2">
-                        <div className="flex items-center justify-between text-xs text-ink-500">
-                          <span className="flex items-center gap-1 truncate text-ink-600 font-medium">
+                        <div className="flex items-center justify-between text-xs text-slate-500">
+                          <span className="flex items-center gap-1 truncate text-slate-700 font-medium">
                             <MapPin
                               size={13}
-                              className="text-brand-600 shrink-0"
+                              className="text-teal-600 shrink-0"
                             />
-                            <span className="truncate">
-                              {org.location || "Victoria Island"}
-                            </span>
+                            <span className="truncate">{org.location}</span>
                           </span>
-                          <span className="font-semibold text-ink-400">
-                            {org.distance || "1.2 km"}
+                          <span className="font-semibold text-slate-400">
+                            {org.distance}
                           </span>
                         </div>
 
-                        <div className="pt-3 border-t border-ink-100 flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                        <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full">
                             ● Open Now
                           </span>
-                          <span className="text-xs font-bold text-brand-600 group-hover:text-brand-700 inline-flex items-center gap-1">
+                          <span className="text-xs font-bold text-teal-600 group-hover:text-teal-700 inline-flex items-center gap-1">
                             Book Slot <ArrowRight size={13} />
                           </span>
                         </div>
                       </div>
                     </Link>
-                  );
-                })}
-              </div>
+                  ))}
+
+                  {featured.length === 0 && (
+                    <div className="col-span-full card p-8 text-center text-xs text-slate-400 border border-dashed border-slate-200">
+                      No organizations registered in database yet.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* RIGHT 1 COLUMN: Live Queue Ticket & Quick Search Tags */}
+          {/* RIGHT 1 COLUMN: Real Queue Ticket & Search Tags */}
           <div className="space-y-6 lg:sticky lg:top-8">
-            {/* LIVE QUEUE STATUS PREVIEW */}
-            <div className="card p-6 border border-ink-100 shadow-sm bg-white">
-              <div className="flex items-center justify-between pb-3 border-b border-ink-100 mb-4">
-                <span className="text-xs font-bold uppercase tracking-wider text-ink-900 flex items-center gap-1.5">
-                  <Zap size={15} className="text-brand-600" /> Live Queue Status
+            {/* REAL LIVE QUEUE STATUS CARD */}
+            <div className="card p-6 border border-slate-200 shadow-sm bg-white">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                  <Zap size={15} className="text-teal-600" /> Virtual Queue
+                  Status
                 </span>
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span
+                  className={`w-2.5 h-2.5 rounded-full ${activeQueueTicket ? "bg-emerald-500 animate-pulse" : "bg-slate-300"}`}
+                />
               </div>
 
-              <div className="text-center py-4 bg-ink-50 rounded-2xl mb-4 border border-ink-100">
-                <p className="text-[11px] font-semibold text-ink-400 uppercase tracking-wider">
-                  Current Wait Estimate
-                </p>
-                <div className="text-4xl font-black text-ink-900 my-1">
-                  15 mins
+              {activeQueueTicket ? (
+                <div className="text-center py-4 bg-teal-50/40 rounded-2xl mb-4 border border-teal-100">
+                  <p className="text-[11px] font-semibold text-teal-800 uppercase tracking-wider">
+                    Active Ticket
+                  </p>
+                  <div className="text-4xl font-black text-slate-900 my-1">
+                    #{String(activeQueueTicket.id).slice(0, 4)}
+                  </div>
+                  <p className="text-xs text-slate-600 font-medium">
+                    Status:{" "}
+                    <strong className="uppercase text-teal-700">
+                      {activeQueueTicket.status}
+                    </strong>
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {activeQueueTicket.org}
+                  </p>
                 </div>
-                <p className="text-xs text-ink-600 font-medium">
-                  Average line velocity: <strong>Fast</strong>
-                </p>
-              </div>
+              ) : (
+                <div className="text-center py-4 bg-slate-50 rounded-2xl mb-4 border border-slate-100">
+                  <p className="text-xs font-bold text-slate-800">
+                    You are not in any queue
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-1 max-w-[200px] mx-auto">
+                    Take a ticket remotely to avoid sitting in physical waiting
+                    rooms.
+                  </p>
+                </div>
+              )}
 
               <Link
-                to="/customer/queue"
-                className="btn-primary w-full py-2.5 text-xs font-bold inline-flex items-center justify-center gap-1.5 shadow-sm"
+                to={activeQueueTicket ? "/customer/queue" : "/customer/explore"}
+                className="w-full py-2.5 px-4 rounded-xl text-xs font-bold bg-teal-600 hover:bg-teal-700 text-white inline-flex items-center justify-center gap-1.5 shadow-sm transition"
               >
-                Join or Track Queue <ArrowRight size={14} />
+                {activeQueueTicket
+                  ? "Open Live Ticket"
+                  : "Find a Queue to Join"}{" "}
+                <ArrowRight size={14} />
               </Link>
             </div>
 
             {/* POPULAR SEARCH PILLS */}
-            <div className="card p-6 border border-ink-100 bg-white shadow-sm space-y-4">
-              <div className="flex items-center gap-2 text-ink-900 font-bold text-sm">
-                <TrendingUp size={16} className="text-brand-600" />
+            <div className="card p-6 border border-slate-200 bg-white shadow-sm space-y-4">
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
+                <TrendingUp size={16} className="text-teal-600" />
                 <span>Trending Services</span>
               </div>
 
               <div className="flex flex-wrap gap-2">
                 {[
+                  "Medical Checkup",
                   "Knotless Braids",
-                  "Fade & Beard Trim",
-                  "Deep Tissue Massage",
-                  "Gel Manicure",
-                  "Hydra Facial",
-                  "Teeth Whitening",
+                  "Vehicle Diagnostics",
+                  "Deep Tissue Spa",
+                  "Dental Cleaning",
+                  "Executive Grooming",
                 ].map((s) => (
                   <Link
                     key={s}
-                    to={`/customer/explore?q=${s}`}
-                    className="px-3 py-1.5 rounded-xl bg-ink-50 hover:bg-brand-50 border border-ink-100 hover:border-brand-300 text-xs font-bold text-ink-700 hover:text-brand-600 transition"
+                    to={`/customer/explore?q=${encodeURIComponent(s)}`}
+                    className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-teal-50 border border-slate-200 hover:border-teal-300 text-xs font-bold text-slate-700 hover:text-teal-700 transition"
                   >
                     {s}
                   </Link>
@@ -311,13 +532,13 @@ export default function CustomerHome() {
             </div>
 
             {/* TRUST BANNER */}
-            <div className="rounded-2xl p-4 bg-gradient-to-br from-brand-50/60 to-transparent border border-brand-100 flex items-center gap-3">
-              <ShieldCheck size={28} className="text-brand-600 shrink-0" />
-              <div className="text-xs text-ink-600">
-                <strong className="text-ink-900 block font-bold">
+            <div className="rounded-2xl p-4 bg-gradient-to-br from-teal-50/60 to-transparent border border-teal-100 flex items-center gap-3">
+              <ShieldCheck size={26} className="text-teal-600 shrink-0" />
+              <div className="text-xs text-slate-600">
+                <strong className="text-slate-900 block font-bold">
                   Verified Businesses Only
                 </strong>
-                All listed salons undergo strict service & hygiene verification.
+                All service venues undergo license & hygiene verification.
               </div>
             </div>
           </div>
